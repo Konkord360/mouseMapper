@@ -156,6 +156,7 @@ pub struct EditingMacro {
     pub macro_type: MacroType,
     pub actions: Vec<MacroAction>,
     pub interval_ms: String,
+    pub jitter_ms: String,
     pub field_index: usize, // which field is focused
 }
 
@@ -435,6 +436,7 @@ impl App {
             macro_type: MacroType::RepeatOnHold,
             actions: vec![MacroAction::Click("BTN_LEFT".to_string())],
             interval_ms: "50".to_string(),
+            jitter_ms: "10".to_string(),
             field_index: 0,
         });
         self.input_mode = InputMode::Editing(String::new());
@@ -449,6 +451,7 @@ impl App {
                 macro_type: macro_def.macro_type.clone(),
                 actions: macro_def.actions.clone(),
                 interval_ms: macro_def.interval_ms.to_string(),
+                jitter_ms: macro_def.jitter_ms.to_string(),
                 field_index: 0,
             });
             self.input_mode = InputMode::Editing(String::new());
@@ -458,12 +461,14 @@ impl App {
     pub fn save_editing_macro(&mut self) {
         if let Some(ref editing) = self.editing_macro.clone() {
             let interval_ms = editing.interval_ms.parse().unwrap_or(50);
+            let jitter_ms = editing.jitter_ms.parse().unwrap_or(0);
             let macro_def = MacroDef {
                 name: editing.name.clone(),
                 macro_type: editing.macro_type.clone(),
                 actions: editing.actions.clone(),
                 interval_ms,
                 initial_delay_ms: 0,
+                jitter_ms,
             };
 
             if let Some(profile) = self.config.active_profile_mut() {
@@ -516,9 +521,16 @@ impl App {
             return;
         }
 
+        let msg = match &field {
+            CaptureField::BindingInput => "Press a mouse button to capture... (Esc to cancel)",
+            CaptureField::BindingOutput => {
+                "Press a key or mouse button to capture... (Esc to cancel)"
+            }
+        };
+
         self.capturing = true;
         self.input_mode = InputMode::Capturing { field };
-        self.set_status("Press a mouse button to capture... (Esc to cancel)");
+        self.set_status(msg);
     }
 
     /// Get the list of macro names from the active profile

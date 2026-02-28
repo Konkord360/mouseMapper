@@ -70,6 +70,9 @@ pub struct MacroDef {
     /// Optional initial delay before first repeat
     #[serde(default)]
     pub initial_delay_ms: u64,
+    /// Random jitter added to interval (±jitter_ms) to make timing look human
+    #[serde(default)]
+    pub jitter_ms: u64,
 }
 
 fn default_interval() -> u64 {

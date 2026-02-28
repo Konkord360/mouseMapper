@@ -402,7 +402,7 @@ fn handle_editing_macro_input(app: &mut App, key: KeyCode) {
         }
         KeyCode::Down => {
             if let Some(ref mut editing) = app.editing_macro {
-                if editing.field_index < 3 {
+                if editing.field_index < 4 {
                     editing.field_index += 1;
                 }
             }
@@ -426,6 +426,9 @@ fn handle_editing_macro_input(app: &mut App, key: KeyCode) {
                     }
                     3 => {
                         editing.interval_ms.pop();
+                    }
+                    4 => {
+                        editing.jitter_ms.pop();
                     }
                     _ => {}
                 }
@@ -452,6 +455,11 @@ fn handle_editing_macro_input(app: &mut App, key: KeyCode) {
                             editing.interval_ms.push(c);
                         }
                     }
+                    4 => {
+                        if c.is_ascii_digit() {
+                            editing.jitter_ms.push(c);
+                        }
+                    }
                     _ => {}
                 }
             }
@@ -461,14 +469,83 @@ fn handle_editing_macro_input(app: &mut App, key: KeyCode) {
 }
 
 fn handle_capture_input(app: &mut App, key: KeyCode) {
-    // In capture mode, the actual button capture comes from the evdev background task
-    // via poll_capture(). The only keyboard input we handle here is Esc to cancel.
     if key == KeyCode::Esc {
         app.capturing = false;
         app.input_mode = InputMode::Editing(String::new());
         app.set_status("Capture cancelled");
+        return;
     }
-    // All other keyboard keys are ignored — we're waiting for a mouse button via evdev
+
+    // For BindingInput: only mouse buttons (via engine stream) are accepted.
+    // Keyboard keys are ignored here — the engine's event stream handles mouse capture.
+    //
+    // For BindingOutput: also accept keyboard keys from crossterm, so the user can
+    // remap a mouse button to a keyboard key (e.g. BTN_RIGHT -> KEY_A).
+    // Mouse button outputs are still captured via the engine stream in poll_engine_messages().
+    let is_output_capture = matches!(
+        &app.input_mode,
+        InputMode::Capturing {
+            field: app::CaptureField::BindingOutput
+        }
+    );
+
+    if is_output_capture {
+        if let Some(evdev_name) = crossterm_to_evdev_name(key) {
+            if let Some(ref mut editing) = app.editing_binding {
+                editing.output_value = evdev_name.clone();
+            }
+            app.capturing = false;
+            app.input_mode = InputMode::Editing(String::new());
+            app.set_status(format!("Captured: {}", evdev_name));
+        }
+        // If crossterm_to_evdev_name returns None, ignore the key (unsupported key)
+    }
+    // For BindingInput: all keyboard keys are silently ignored — waiting for mouse via engine
+}
+
+/// Convert a crossterm KeyCode to the corresponding evdev key name string.
+/// Returns None for keys that don't have a direct evdev mapping or shouldn't be captured.
+fn crossterm_to_evdev_name(key: KeyCode) -> Option<String> {
+    match key {
+        // Letters
+        KeyCode::Char(c) if c.is_ascii_alphabetic() => {
+            Some(format!("KEY_{}", c.to_ascii_uppercase()))
+        }
+        // Digits
+        KeyCode::Char(c) if c.is_ascii_digit() => Some(format!("KEY_{}", c)),
+        // Punctuation / symbols
+        KeyCode::Char('-') => Some("KEY_MINUS".to_string()),
+        KeyCode::Char('=') => Some("KEY_EQUAL".to_string()),
+        KeyCode::Char('[') => Some("KEY_LEFTBRACE".to_string()),
+        KeyCode::Char(']') => Some("KEY_RIGHTBRACE".to_string()),
+        KeyCode::Char(';') => Some("KEY_SEMICOLON".to_string()),
+        KeyCode::Char('\'') => Some("KEY_APOSTROPHE".to_string()),
+        KeyCode::Char('`') => Some("KEY_GRAVE".to_string()),
+        KeyCode::Char('\\') => Some("KEY_BACKSLASH".to_string()),
+        KeyCode::Char(',') => Some("KEY_COMMA".to_string()),
+        KeyCode::Char('.') => Some("KEY_DOT".to_string()),
+        KeyCode::Char('/') => Some("KEY_SLASH".to_string()),
+        KeyCode::Char(' ') => Some("KEY_SPACE".to_string()),
+        // Function keys
+        KeyCode::F(n @ 1..=12) => Some(format!("KEY_F{}", n)),
+        // Special keys
+        KeyCode::Enter => Some("KEY_ENTER".to_string()),
+        KeyCode::Tab => Some("KEY_TAB".to_string()),
+        KeyCode::Backspace => Some("KEY_BACKSPACE".to_string()),
+        KeyCode::Delete => Some("KEY_DELETE".to_string()),
+        KeyCode::Insert => Some("KEY_INSERT".to_string()),
+        KeyCode::Home => Some("KEY_HOME".to_string()),
+        KeyCode::End => Some("KEY_END".to_string()),
+        KeyCode::PageUp => Some("KEY_PAGEUP".to_string()),
+        KeyCode::PageDown => Some("KEY_PAGEDOWN".to_string()),
+        KeyCode::Up => Some("KEY_UP".to_string()),
+        KeyCode::Down => Some("KEY_DOWN".to_string()),
+        KeyCode::Left => Some("KEY_LEFT".to_string()),
+        KeyCode::Right => Some("KEY_RIGHT".to_string()),
+        KeyCode::CapsLock => Some("KEY_CAPSLOCK".to_string()),
+        // Esc is handled separately as cancel — don't capture it
+        _ => None,
+    }
 }
 
 fn handle_confirm_input(app: &mut App, key: KeyCode) {

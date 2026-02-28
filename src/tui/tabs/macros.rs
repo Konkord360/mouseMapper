@@ -27,13 +27,15 @@ pub fn render(f: &mut Frame, app: &App, area: Rect) {
         );
         f.render_widget(msg, area);
     } else if app.editing_macro.is_none() {
-        let header_cells = ["Name", "Type", "Actions", "Interval"].iter().map(|h| {
-            Cell::from(*h).style(
-                Style::default()
-                    .fg(Color::Yellow)
-                    .add_modifier(Modifier::BOLD),
-            )
-        });
+        let header_cells = ["Name", "Type", "Actions", "Interval", "Jitter"]
+            .iter()
+            .map(|h| {
+                Cell::from(*h).style(
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD),
+                )
+            });
         let header = Row::new(header_cells).height(1);
 
         let rows: Vec<Row> = macros
@@ -53,12 +55,18 @@ pub fn render(f: &mut Frame, app: &App, area: Rect) {
                     .join(", ");
 
                 let interval = format!("{}ms", m.interval_ms);
+                let jitter = if m.jitter_ms > 0 {
+                    format!("\u{00b1}{}ms", m.jitter_ms)
+                } else {
+                    "off".to_string()
+                };
 
                 Row::new(vec![
                     Cell::from(m.name.clone()),
                     Cell::from(type_str),
                     Cell::from(actions_str),
                     Cell::from(interval),
+                    Cell::from(jitter),
                 ])
             })
             .collect();
@@ -66,7 +74,8 @@ pub fn render(f: &mut Frame, app: &App, area: Rect) {
         let widths = [
             Constraint::Length(20),
             Constraint::Length(16),
-            Constraint::Min(30),
+            Constraint::Min(20),
+            Constraint::Length(10),
             Constraint::Length(10),
         ];
 
@@ -98,7 +107,7 @@ pub fn render(f: &mut Frame, app: &App, area: Rect) {
 
 fn render_edit_dialog(f: &mut Frame, editing: &crate::tui::app::EditingMacro, area: Rect) {
     let dialog_width = 65.min(area.width.saturating_sub(4));
-    let dialog_height = 16.min(area.height.saturating_sub(4));
+    let dialog_height = 19.min(area.height.saturating_sub(4));
     let x = area.x + (area.width.saturating_sub(dialog_width)) / 2;
     let y = area.y + (area.height.saturating_sub(dialog_height)) / 2;
     let dialog_area = Rect::new(x, y, dialog_width, dialog_height);
@@ -207,6 +216,36 @@ fn render_edit_dialog(f: &mut Frame, editing: &crate::tui::app::EditingMacro, ar
                 },
             ),
             Span::raw(field_indicator(3)),
+        ]),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("  Jitter:   ", Style::default().fg(Color::Yellow)),
+            Span::styled(
+                format!(
+                    "[\u{00b1}{}ms]",
+                    if editing.jitter_ms.is_empty() {
+                        "0"
+                    } else {
+                        &editing.jitter_ms
+                    }
+                ),
+                if editing.field_index == 4 {
+                    Style::default()
+                        .fg(Color::White)
+                        .add_modifier(Modifier::BOLD)
+                } else {
+                    Style::default().fg(Color::Gray)
+                },
+            ),
+            Span::raw(field_indicator(4)),
+            if editing.field_index == 4 {
+                Span::styled(
+                    "  (random timing variance)",
+                    Style::default().fg(Color::DarkGray),
+                )
+            } else {
+                Span::raw("")
+            },
         ]),
         Line::from(""),
         Line::from(Span::styled(

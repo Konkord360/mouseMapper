@@ -3,6 +3,8 @@ use crate::device::writer::DeviceWriter;
 use crate::engine::mapper::parse_key_name;
 use anyhow::Result;
 use evdev::KeyCode;
+use rand::rngs::StdRng;
+use rand::{Rng, SeedableRng};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use tokio::sync::watch;
@@ -61,6 +63,7 @@ impl MacroEngine {
                 let writer = self.writer.clone();
                 let actions = macro_def.actions.clone();
                 let interval = std::time::Duration::from_millis(macro_def.interval_ms);
+                let jitter_ms = macro_def.jitter_ms;
                 let initial_delay = if macro_def.initial_delay_ms > 0 {
                     Some(std::time::Duration::from_millis(macro_def.initial_delay_ms))
                 } else {
@@ -68,7 +71,8 @@ impl MacroEngine {
                 };
 
                 handle.spawn(async move {
-                    run_repeat_macro(writer, actions, interval, initial_delay, cancel_rx).await;
+                    run_repeat_macro(writer, actions, interval, jitter_ms, initial_delay, cancel_rx)
+                        .await;
                 });
             }
 
@@ -100,9 +104,11 @@ impl MacroEngine {
                     let writer = self.writer.clone();
                     let actions = macro_def.actions.clone();
                     let interval = std::time::Duration::from_millis(macro_def.interval_ms);
+                    let jitter_ms = macro_def.jitter_ms;
 
                     handle.spawn(async move {
-                        run_repeat_macro(writer, actions, interval, None, cancel_rx).await;
+                        run_repeat_macro(writer, actions, interval, jitter_ms, None, cancel_rx)
+                            .await;
                     });
                 }
             }
@@ -137,6 +143,7 @@ async fn run_repeat_macro(
     writer: Arc<Mutex<DeviceWriter>>,
     actions: Vec<MacroAction>,
     interval: std::time::Duration,
+    jitter_ms: u64,
     initial_delay: Option<std::time::Duration>,
     mut cancel_rx: watch::Receiver<bool>,
 ) {
@@ -147,6 +154,8 @@ async fn run_repeat_macro(
         }
     }
 
+    let mut rng = StdRng::from_entropy();
+
     loop {
         // Execute all actions in the sequence
         for action in &actions {
@@ -156,9 +165,27 @@ async fn run_repeat_macro(
             execute_action(&writer, action);
         }
 
-        // Wait for the interval or cancellation
+        // Compute sleep duration with random jitter
+        let sleep_duration = if jitter_ms > 0 {
+            let base_ms = interval.as_millis() as i64;
+            let jitter = jitter_ms as i64;
+            let offset = rng.gen_range(-jitter..=jitter);
+            let actual_ms = (base_ms + offset).max(1) as u64;
+            log::debug!(
+                "repeat sleep: {}ms (base={}ms, jitter=\u{00b1}{}ms, offset={:+}ms)",
+                actual_ms,
+                base_ms,
+                jitter_ms,
+                offset
+            );
+            std::time::Duration::from_millis(actual_ms)
+        } else {
+            interval
+        };
+
+        // Wait for the (jittered) interval or cancellation
         tokio::select! {
-            _ = tokio::time::sleep(interval) => {}
+            _ = tokio::time::sleep(sleep_duration) => {}
             _ = cancel_rx.changed() => { return; }
         }
     }
